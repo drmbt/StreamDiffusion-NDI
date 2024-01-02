@@ -1,7 +1,17 @@
 {
+	"prompt": "impressionist painting by monet",
+	"negative_prompt": "watermark, signature, text, blurry, low resolution, pixelated, pixel art, low quality, low fidelity",
 	"sd_model": "darkstorm2150/Protogen_v2.2_Official_Release",
-	"t_index_list": [25,45],
-	"engine": "../engines/darkstorm2150/Protogen_v2.2_Official_Release--lcm_lora-True--tiny_vae-True--max_batch-2--min_batch-2--mode-img2img",
+	"t_index_list": [25, 45],
+	"guidance_scale": 1.2,
+	"seed": 2,
+	"delta": 0.5,
+	"engine": "../engines/darkstorm2150/Protogen_Protogen_v2.2_Official_Release--lcm_lora-True--tiny_vae-True--max_batch-2--min_batch-2--mode-img2img",
+	"enable_similar_image_filter": "True",
+	"cfg_type": "initialize",
+    "num_inference_steps": 50,
+	"similar_image_filter_threshold": 0.98,
+	"similar_image_filter_max_skip_frame": 10.0,
 	"min_batch_size": 1,
 	"max_batch_size": 2,
 	"osc_out_adress": "127.0.0.1",
@@ -9,3 +19,4 @@
 	"osc_in_adress": "127.0.0.1",
 	"osc_in_port": 12346
 }
+

@@ -1,3 +1,4 @@
+from distutils.command.config import config
 import torch
 from diffusers import AutoencoderTiny, StableDiffusionPipeline
 from diffusers.utils import load_image
@@ -17,6 +18,7 @@ from pythonosc.dispatcher import Dispatcher
 from threading import Thread
 from typing import List, Any, Tuple
 import json
+import traceback
 
 def process_image(image_np: np.ndarray, range: Tuple[int, int] = (-1, 1)) -> Tuple[torch.Tensor, np.ndarray]:
     image = torch.from_numpy(image_np).permute(2, 0, 1).float() / 255.0
@@ -48,151 +50,199 @@ def load_config(file_path):
     return config
 
 # Load config
+
 config_data = load_config('config.json')
 sd_model = config_data['sd_model']
 t_index_list = config_data['t_index_list']
 engine = config_data['engine']
+cfg_type = config_data['cfg_type']
+guidance_scale = config_data['guidance_scale']
+delta = config_data["delta"]
+seed = config_data["seed"]
+prompt = config_data['prompt']
+negative_prompt = config_data["negative_prompt"]
+num_inference_steps = config_data["num_inference_steps"] 
 min_batch_size = config_data['min_batch_size']
 max_batch_size = config_data['max_batch_size']
 osc_out_adress = config_data['osc_out_adress']
 osc_out_port = config_data['osc_out_port']
 osc_in_adress = config_data['osc_in_adress']
 osc_in_port = config_data['osc_in_port']
+enable_similar_image_filter = config_data['enable_similar_image_filter'],
+similar_image_filter_threshold = config_data['similar_image_filter_threshold'],
+similar_image_filter_max_skip_frame = config_data['similar_image_filter_max_skip_frame']
+
 print(config_data)
 
-# You can load any models using diffuser's StableDiffusionPipeline
-pipe = StableDiffusionPipeline.from_pretrained(sd_model).to(
-    device=torch.device("cuda"),
-    dtype=torch.float16,
-)
-
-frame_buffer_size = 1
-
-# Wrap the pipeline in StreamDiffusion
-stream = StreamDiffusion(
-    pipe,
-    t_index_list=t_index_list,
-    torch_dtype=torch.float16,
-    frame_buffer_size = frame_buffer_size
-)
-
-# If the loaded model is not LCM, merge LCM
-stream.load_lcm_lora()
-stream.fuse_lora()
-# Use Tiny VAE for further acceleration
-stream.vae = AutoencoderTiny.from_pretrained("madebyollin/taesd").to(device=pipe.device, dtype=pipe.dtype)
-# Enable acceleration
-stream = accelerate_with_tensorrt(
-    stream, engine, min_batch_size=min_batch_size ,max_batch_size=max_batch_size
-)
-
-prompt = "banana in space"
-# Prepare the stream
-stream.prepare(prompt)
-
-# NDI
-ndi_find = ndi.find_create_v2()
-
-sources = []
-while not len(sources) > 0:
-    print('Looking for sources ...')
-    ndi.find_wait_for_sources(ndi_find, 1000)
-    sources = ndi.find_get_current_sources(ndi_find)
-
-print('NDI connected')
-
-ndi_recv_create = ndi.RecvCreateV3()
-ndi_recv_create.color_format = ndi.RECV_COLOR_FORMAT_BGRX_BGRA
-ndi_recv = ndi.recv_create_v3(ndi_recv_create)
-ndi.recv_connect(ndi_recv, sources[0])
-ndi.find_destroy(ndi_find)
-cv.startWindowThread()
-send_settings = ndi.SendCreate()
-send_settings.ndi_name = 'SD-NDI'
-ndi_send = ndi.send_create(send_settings)
-video_frame = ndi.VideoFrameV2()
-
-# OSC
-server_address = osc_out_adress
-server_port = osc_out_port
-client = udp_client.SimpleUDPClient(server_address, server_port)
-
-server_address = osc_in_adress
-server_port = osc_in_port
-shared_message = None
-
-dispatcher = Dispatcher()
-dispatcher.map("/prompt", oscprompt)
-
-server = osc_server.ThreadingOSCUDPServer(
-      (server_address, server_port), dispatcher)
-
-server_thread = Thread(target=server.serve_forever)
-server_thread.start()
-
-# Run the stream infinitely
 try:
-    while True:
-        if shared_message is not None:
+    print(f"!!!!!!!!!!!!!! {enable_similar_image_filter[0]}")
+    # You can load any models using diffuser's StableDiffusionPipeline
+    pipe = StableDiffusionPipeline.from_pretrained(sd_model).to(
+        device=torch.device("cuda"),
+        dtype=torch.float16,
+    )
 
-            prompt = str(shared_message)
-            stream.prepare(prompt)
-            # Process the received message within the loop as needed
-            print(f"Prompt: {prompt}")
-            # Reset the shared_message variable
-            shared_message = None
+    frame_buffer_size = 1
+    
 
-        t, v, _, _ = ndi.recv_capture_v2(ndi_recv, 5000)
+    frame_buffer_size = 1
+    if enable_similar_image_filter[0] == "True":
+        # if len(t_index_list)>2:
+        #     t_index_list= [t_index_list[1], t_index_list[2]]
+        # Wrap the pipeline in StreamDiffusion
+        print("**************** enable similar image")
+        stream = StreamDiffusion(
+            pipe,
+            t_index_list=t_index_list,
+            torch_dtype=torch.float16,
+            frame_buffer_size = frame_buffer_size,
+            # cfg_type = cfg_type,
+            # seed = seed,
+            # guidance_scale = guidance_scale,
+            # delta = delta,
+            # num_inference_steps = num_inference_steps
+        )
 
-        if t == ndi.FRAME_TYPE_VIDEO:
+        stream.enable_similar_image_filter(
+            # similar_image_filter_threshold,
+            # similar_image_filter_max_skip_frame,
+        )
+    else:
+        stream = StreamDiffusion(
+            pipe,
+            t_index_list=t_index_list,
+            torch_dtype=torch.float16,
+            frame_buffer_size = frame_buffer_size,
+        )
 
-            frame = np.copy(v.data)
-            framergb = cv.cvtColor(frame, cv.COLOR_BGRA2BGR)
 
-            inputs = []
 
-            inputs.append(np2tensor(framergb))
+    # If the loaded model is not LCM, merge LCM
+    stream.load_lcm_lora()
+    stream.fuse_lora()
+    # Use Tiny VAE for further acceleration
+    stream.vae = AutoencoderTiny.from_pretrained("madebyollin/taesd").to(device=pipe.device, dtype=pipe.dtype)
+    # Enable acceleration
+    stream = accelerate_with_tensorrt(
+        stream, engine, min_batch_size=min_batch_size ,max_batch_size=max_batch_size
+    )
 
-            if len(inputs) < frame_buffer_size:
-                time.sleep(0.005)
-                continue
-            start_time = time.time()
-            sampled_inputs = []
-            for i in range(frame_buffer_size):
-                index = (len(inputs) // frame_buffer_size) * i
-                sampled_inputs.append(inputs[len(inputs) - index - 1])
-            input_batch = torch.cat(sampled_inputs)
-            inputs.clear()
-            output_images = stream(
-                input_batch.to(device=stream.device, dtype=stream.dtype)
-            ).cpu()
-            if frame_buffer_size == 1:
-                output_images = [output_images]
-            for output_image in output_images:
-                output_image = postprocess_image(output_image, output_type="np")[0]
+    prompt = "banana in space"
+    # Prepare the stream
+    stream.prepare(
+        prompt,
+        negative_prompt,
+        num_inference_steps,
+        guidance_scale,
+        seed
+        )
 
-                open_cv_image = (output_image * 255).round().astype("uint8")
+    # NDI
+    ndi_find = ndi.find_create_v2()
 
-                img = cv.cvtColor(open_cv_image, cv.COLOR_RGB2RGBA)
-                ndi.recv_free_video_v2(ndi_recv, v)
+    sources = []
+    while not len(sources) > 0:
+        print('Looking for sources ...')
+        ndi.find_wait_for_sources(ndi_find, 1000)
+        sources = ndi.find_get_current_sources(ndi_find)
 
-                video_frame.data = img
-                video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
+    print('NDI connected')
 
-                ndi.send_send_video_v2(ndi_send, video_frame)
+    ndi_recv_create = ndi.RecvCreateV3()
+    ndi_recv_create.color_format = ndi.RECV_COLOR_FORMAT_BGRX_BGRA
+    ndi_recv = ndi.recv_create_v3(ndi_recv_create)
+    ndi.recv_connect(ndi_recv, sources[0])
+    ndi.find_destroy(ndi_find)
+    cv.startWindowThread()
+    send_settings = ndi.SendCreate()
+    send_settings.ndi_name = 'SD-NDI'
+    ndi_send = ndi.send_create(send_settings)
+    video_frame = ndi.VideoFrameV2()
 
-            fps = 1 / (time.time() - start_time)
+    # OSC
+    server_address = osc_out_adress
+    server_port = osc_out_port
+    client = udp_client.SimpleUDPClient(server_address, server_port)
 
-            client.send_message("/fps", fps)
+    server_address = osc_in_adress
+    server_port = osc_in_port
+    shared_message = None
 
-except KeyboardInterrupt:
-    # Handle KeyboardInterrupt (Ctrl+C)
-    print("KeyboardInterrupt: Stopping the server")
-finally:
-    # Stop the server when the loop exits
-    ndi.recv_destroy(ndi_recv)
-    ndi.send_destroy(ndi_send)
-    ndi.destroy()
-    cv.destroyAllWindows()
-    server.shutdown()
-    server_thread.join()
+    dispatcher = Dispatcher()
+    dispatcher.map("/prompt", oscprompt)
+
+    server = osc_server.ThreadingOSCUDPServer(
+        (server_address, server_port), dispatcher)
+
+    server_thread = Thread(target=server.serve_forever)
+    server_thread.start()
+
+    # Run the stream infinitely
+    try:
+        while True:
+            if shared_message is not None:
+
+                prompt = str(shared_message)
+                stream.prepare(prompt)
+                # Process the received message within the loop as needed
+                print(f"Prompt: {prompt}")
+                # Reset the shared_message variable
+                shared_message = None
+
+            t, v, _, _ = ndi.recv_capture_v2(ndi_recv, 5000)
+
+            if t == ndi.FRAME_TYPE_VIDEO:
+
+                frame = np.copy(v.data)
+                framergb = cv.cvtColor(frame, cv.COLOR_BGRA2BGR)
+
+                inputs = []
+
+                inputs.append(np2tensor(framergb))
+
+                if len(inputs) < frame_buffer_size:
+                    time.sleep(0.005)
+                    continue
+                start_time = time.time()
+                sampled_inputs = []
+                for i in range(frame_buffer_size):
+                    index = (len(inputs) // frame_buffer_size) * i
+                    sampled_inputs.append(inputs[len(inputs) - index - 1])
+                input_batch = torch.cat(sampled_inputs)
+                inputs.clear()
+                output_images = stream(
+                    input_batch.to(device=stream.device, dtype=stream.dtype)
+                ).cpu()
+                if frame_buffer_size == 1:
+                    output_images = [output_images]
+                for output_image in output_images:
+                    output_image = postprocess_image(output_image, output_type="np")[0]
+
+                    open_cv_image = (output_image * 255).round().astype("uint8")
+
+                    img = cv.cvtColor(open_cv_image, cv.COLOR_RGB2RGBA)
+                    ndi.recv_free_video_v2(ndi_recv, v)
+
+                    video_frame.data = img
+                    video_frame.FourCC = ndi.FOURCC_VIDEO_TYPE_BGRX
+
+                    ndi.send_send_video_v2(ndi_send, video_frame)
+
+                fps = 1 / (time.time() - start_time)
+
+                client.send_message("/fps", fps)
+
+    except KeyboardInterrupt:
+        # Handle KeyboardInterrupt (Ctrl+C)
+        print("KeyboardInterrupt: Stopping the server")
+    finally:
+        # Stop the server when the loop exits
+        ndi.recv_destroy(ndi_recv)
+        ndi.send_destroy(ndi_send)
+        ndi.destroy()
+        cv.destroyAllWindows()
+        server.shutdown()
+        server_thread.join()
+except Exception as e:
+    print("An exception occurred: ", e)
+    traceback.print_exc()

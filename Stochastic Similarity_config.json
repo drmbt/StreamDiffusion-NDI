@@ -1,0 +1,22 @@
+{
+	"prompt": "impressionist painting by monet",
+	"negative_prompt": "watermark, signature, text, blurry, low resolution, pixelated, pixel art, low quality, low fidelity",
+	"sd_model": "dreamlike-art/dreamlike-photoreal-2.0",
+	"t_index_list": [32, 45],
+	"engine": "../engines/dreamlike-art/dreamlike-photoreal-2.0--lcm_lora-True--tiny_vae-True--max_batch-3--min_batch-3--mode-img2img",
+	"enable_similar_image_filter": "True",
+	"cfg_type": "none",
+	"guidance_scale": 1.2,
+	"delta": 0.5,
+	"seed": 2,
+    "num_inference_steps": 50,
+	"similar_image_filter_threshold": 0.98,
+	"similar_image_filter_max_skip_frame": 10.0,
+	"min_batch_size": 1,
+	"max_batch_size": 2,
+	"osc_out_adress": "127.0.0.1",
+	"osc_out_port": 12345,
+	"osc_in_adress": "127.0.0.1",
+	"osc_in_port": 12346
+}
+
